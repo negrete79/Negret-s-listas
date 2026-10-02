@@ -1,5 +1,5 @@
 /* NEGRET'Slist — Service Worker: cache-first, 100% offline após a 1ª visita */
-const CACHE = 'negretslist-v7';
+const CACHE = 'negretslist-v8';
 const CORE = [
   './', './index.html', './app.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'
@@ -9,7 +9,6 @@ const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    /* um arquivo por vez: se algum 404ar, o resto continua sendo cacheado */
     for (const url of CORE) { try { await cache.add(url); } catch (_) {} }
     try { await cache.add(new Request(JSPDF, { mode: 'cors', credentials: 'omit' })); } catch (_) {}
     self.skipWaiting();
