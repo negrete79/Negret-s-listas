@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Diagnóstico PWA — NEGRET'Slist</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#0F1115;color:#EAEAF0;margin:0;padding:18px;max-width:520px;margin-inline:auto}
+  h1{font-size:18px;margin-bottom:4px}
+  .url{font-size:12px;color:#8A8FA8;word-break:break-all;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:flex-start;background:#181A22;border:1px solid #232631;border-radius:12px;padding:11px 13px;margin:8px 0}
+  .mark{font-weight:800;font-size:15px;width:22px;flex:0 0 auto;text-align:center}
+  .ok .mark{color:#30D158}.fail .mark{color:#FF453A}.wait .mark{color:#FFD60A}
+  .t b{display:block;font-size:14px}.t span{display:block;font-size:12px;color:#8A8FA8;margin-top:2px;word-break:break-all;line-height:1.45}
+  #verdict{margin-top:14px;padding:14px;border-radius:12px;font-weight:700;font-size:14.5px;line-height:1.5}
+  #verdict.good{background:rgba(48,209,88,.12);border:1px solid rgba(48,209,88,.4);color:#30D158}
+  #verdict.bad{background:rgba(255,69,58,.1);border:1px solid rgba(255,69,58,.35);color:#FF6B60}
+  button{margin-top:14px;width:100%;height:52px;border:none;border-radius:12px;background:#0A84FF;color:#fff;font-weight:700;font-size:15px}
+  button[hidden]{display:none}
+  .tip{font-size:12px;color:#8A8FA8;line-height:1.5;margin-top:12px}
+</style>
+</head>
+<body>
+<h1>Diagnóstico PWA</h1>
+<p class="url" id="urlBox"></p>
+<div id="rows"></div>
+<div id="verdict" class="bad">Analisando…</div>
+<button id="btnInstall" hidden>INSTALAR AGORA</button>
+<p class="tip">Importante: abra esta página pelo endereço publicado (https://…github.io/…/diagnostico.html), nunca como arquivo local — ela testa o que está no repositório.</p>
+
+<script>
+'use strict';
+const rowsEl = document.getElementById('rows');
+let bip = null;
+
+document.getElementById('urlBox').textContent = 'Endereço testado: ' + location.href;
+
+function row(id, title){
+  const d = document.createElement('div');
+  d.className = 'row wait'; d.id = id;
+  d.innerHTML = '<span class="mark">…</span><span class="t"><b></b><span></span></span>';
+  d.querySelector('b').textContent = title;
+  rowsEl.appendChild(d);
+  return d;
+}
+function set(id, state, detail){
+  const d = document.getElementById(id);
+  d.className = 'row ' + state;
+  d.querySelector('.mark').textContent = state === 'ok' ? '✓' : '✗';
+  if (detail) d.querySelector('.t span').textContent = detail;
+  verdict();
+}
+const NOSTORE = { cache: 'no-store' };
+const bust = f => f + '?t=' + Date.now();
+
+function verdict(){
+  const v = document.getElementById('verdict');
+  const all = [...document.querySelectorAll('.row')];
+  if (all.some(r => r.classList.contains('wait'))) { v.className = 'bad'; v.textContent = 'Analisando…'; return; }
+  const fails = all.filter(r => r.classList.contains('fail'));
+  if (!fails.length && bip) {
+    v.className = 'good'; v.textContent = 'TUDO CERTO — toque em INSTALAR AGORA acima (ou ⋮ → Instalar app).';
+  } else if (!fails.length) {
+    v.className = 'bad';
+    v.textContent = 'Arquivos todos OK. O Chrome ainda não liberou o convite — aguarde 1 minuto e recarregue esta página (ele valida o Service Worker em segundo plano).';
+  } else {
+    v.className = 'bad';
+    v.textContent = 'PROBLEMA: ' + fails.map(f => f.querySelector('b').textContent).join(' • ') + '. Corrija o(s) item(ns) com ✗ e reenvie ao repositório.';
+  }
+}
+
+/* 1. HTTPS */
+row('cHttps', 'Conexão segura (HTTPS)');
+if (location.protocol === 'https:') set('cHttps', 'ok', 'HTTPS ativo — requisito atendido.');
+else set('cHttps', 'fail', 'Não está em HTTPS. Abra pelo endereço do GitHub Pages, não como arquivo local.');
+
+/* 2. manifest */
+row('cMan', 'manifest.json');
+fetch(bust('manifest.json'), NOSTORE).then(r => {
+  if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — arquivo não existe no repositório' : ''));
+  return r.json();
+}).then(m => {
+  const problems = [];
+  if (!m.name && !m.short_name) problems.push('falta name/short_name');
+  if (!m.start_url) problems.push('falta start_url');
+  if (!['standalone','fullscreen','minimal-ui'].includes(m.display)) problems.push('display deve ser standalone');
+  const icons = m.icons || [];
+  if (!icons.some(i => (i.sizes || '').includes('192'))) problems.push('falta ícone 192');
+  if (!icons.some(i => (i.sizes || '').includes('512'))) problems.push('falta ícone 512');
+  if (problems.length) set('cMan', 'fail', 'Existe, mas com problemas: ' + problems.join('; '));
+  else set('cMan', 'ok', 'Válido — "' + (m.short_name || m.name) + '"');
+}).catch(e => set('cMan', 'fail', e.message));
+
+/* 3. ícones — baixa cada um de verdade */
+[['icon-192.png','cI192','Ícone 192px'],
+ ['icon-512.png','cI512','Ícone 512px'],
+ ['icon-maskable-512.png','cIMask','Ícone maskable']].forEach(([file, id, title]) => {
+  row(id, title + ' — ' + file);
+  fetch(bust(file), NOSTORE).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — não existe no repo (você gerou e subiu os PNGs?)' : ''));
+    return r.blob();
+  }).then(b => {
+    if (b.type && !b.type.startsWith('image/')) throw new Error('Existe mas não é imagem (' + b.type + ') — confira o nome exato do arquivo');
+    set(id, 'ok', 'Encontrado (' + Math.round(b.size / 1024) + ' KB)');
+  }).catch(e => set(id, 'fail', e.message));
+});
+
+/* 4. app.js e sw.js */
+[['app.js','cApp','app.js (cérebro do app)'],
+ ['sw.js','cSw','sw.js (offline)']].forEach(([file, id, title]) => {
+  row(id, title);
+  fetch(bust(file), NOSTORE).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — não encontrado no repo' : ''));
+    return r.text();
+  }).then(t => {
+    if (/^\s*<(!DOCTYPE|html)/i.test(t)) throw new Error('Existe mas o conteúdo é HTML (página de erro) — nome/caminho errado');
+    set(id, 'ok', 'Encontrado (' + Math.round(t.length / 1024) + ' KB)');
+  }).catch(e => set(id, 'fail', e.message));
+});
+
+/* 5. Service Worker */
+row('cSW', 'Service Worker registrado');
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistration().then(reg => {
+    if (!reg) set('cSW', 'fail', 'Nenhum SW registrado. Recarregue e aguarde 10 s. Se persistir, o sw.js está com erro.');
+    else {
+      const st = (reg.active && 'ativo') || (reg.installing && 'instalando') || (reg.waiting && 'aguardando') || '?';
+      set('cSW', 'ok', 'Registrado — estado: ' + st + (navigator.serviceWorker.controller ? ' • controlando a página' : ' • recarregue 1× para assumir o controle'));
+    }
+  }).catch(e => set('cSW', 'fail', e.message));
+} else set('cSW', 'fail', 'Navegador sem suporte a Service Worker.');
+
+/* 6. convite de instalação */
+row('cBip', 'Convite de instalação (beforeinstallprompt)');
+set('cBip', 'wait', 'Aguardando o Chrome decidir… (até 15 s)');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  bip = e;
+  set('cBip', 'ok', 'O Chrome considera o app INSTALÁVEL! Toque no botão azul abaixo.');
+  document.getElementById('btnInstall').hidden = false;
+});
+setTimeout(() => {
+  if (!bip) {
+    const anyFail = document.querySelector('.row.fail');
+    set('cBip', 'fail', anyFail
+      ? 'Não disparou porque há um ✗ acima. Corrija-o no repositório e recarregue esta página.'
+      : 'Não disparou apesar de tudo ✓. Aguarde 1 min e recarregue; o Chrome às vezes demora para validar.');
+  }
+}, 15000);
+
+document.getElementById('btnInstall').addEventListener('click', async () => {
+  if (!bip) return;
+  bip.prompt();
+  const choice = await bip.userChoice;
+  if (choice && choice.outcome === 'accepted') {
+    const v = document.getElementById('verdict');
+    v.className = 'good';
+    v.textContent = 'Instalação aceita! Procure o ícone azul com ✓ na tela inicial do celular.';
+  }
+  bip = null;
+  document.getElementById('btnInstall').hidden = true;
+});
+</script>
+</body>
+</html>
