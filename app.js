@@ -3,7 +3,7 @@
 /* ================================================================
    NEGRET'S list — comportamento do app (versão completa)
    Lista offline (localStorage) + exportação PDF (jsPDF cacheado)
-   + Premium vendido via WhatsApp com código de ativação
+   + Premium: ID exclusivo do aparelho → WhatsApp → código de liberação
    ================================================================ */
 
 const APP_VERSION = '1.8.13';
@@ -11,20 +11,15 @@ const JSPDF_URL   = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.um
 const KEYS        = { items: 'ench_v2', saved: 'ench_saved', cfg: 'ench_cfg', prem: 'ench_prem' };
 const CFG_DEFAULT = { sort: 'added', strike: true, confirmDel: true, countChecked: false, budget: 0 };
 
-/* ============ Premium (venda via WhatsApp + código) ============ */
+/* ============ Premium: venda via WhatsApp + código de liberação ============ */
 const PREMIUM_WPP = '5531982517147'; /* 55 + DDD 31 + 982517147 */
-const WPP_MSG = "Olá! Quero assinar o NEGRET'Slist Premium (R$ 9,90/mês).\n\nMeu nome: ";
+const WPP_PRICE   = 'R$ 9,90/mês';
 const FREE_LIST_LIMIT = 3; /* listas salvas permitidas no plano gratuito */
 
-/* Códigos de ativação válidos. Vendeu uma assinatura? Adicione um código
-   novo aqui e envie ao cliente pelo WhatsApp. Remova para revogar. */
-const PREMIUM_CODES = [
-  'NGRT-TESTE',    /* código de teste — remova antes de divulgar */
-  'NGRT-7H2K9Q',
-  'NGRT-M4XP8T',
-  'NGRT-B6RJ3V',
-  'NGRT-K9WD5S'
-];
+/* CHAVE SECRETA da ativação. O código de liberação de cada cliente é
+   calculado a partir do ID dele + esta chave. Se trocá-la aqui, troque
+   TAMBÉM no admin.html (painel do dono), senão os códigos não baterão. */
+const ACT_SALT = 'NEGRET-7QX9-MISTURA-K4M';
 
 /* ============ utilitários ============ */
 const $ = s => document.querySelector(s);
@@ -59,6 +54,61 @@ function loadJSON(key, fb) {
 }
 function store(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) {}
+}
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    ta.remove(); return ok;
+  }
+}
+
+/* ============ identidade do aparelho (ID exclusivo do cliente) ============ */
+const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; /* sem I, O, 0 e 1 (evita confusão) */
+function genBlock(n) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += ID_ALPHABET[Math.floor(Math.random() * ID_ALPHABET.length)];
+  return s;
+}
+/* gerado uma única vez por aparelho e guardado para sempre
+   (não é apagado nem em "Apagar tudo": é a identidade do cliente) */
+function ensureDevId() {
+  let id = null;
+  try { id = localStorage.getItem('ench_devid'); } catch (_) {}
+  if (!id || !/^NGRT-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(id)) {
+    id = 'NGRT-' + genBlock(4) + '-' + genBlock(4);
+    try { localStorage.setItem('ench_devid', id); } catch (_) {}
+  }
+  return id;
+}
+const devId = ensureDevId();
+
+/* código de liberação = cálculo determinístico do ID + chave secreta */
+function fnv1a(str) {
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+function libCodeFor(id) {
+  const key = normCode(id);
+  const h1 = fnv1a(ACT_SALT + '|' + key);
+  const h2 = fnv1a(key + '|' + ACT_SALT + '|' + h1);
+  const p1 = h1.toString(36).toUpperCase().padStart(6, '0').slice(0, 4);
+  const p2 = h2.toString(36).toUpperCase().padStart(6, '0').slice(0, 4);
+  return p1 + '-' + p2;
+}
+function checkLiberation(input) {
+  const key = normCode(input);
+  if (key.length < 8) return false;
+  return key.slice(-8) === normCode(libCodeFor(devId));
 }
 
 /* ============ estado ============ */
@@ -576,19 +626,12 @@ function buildExpenses() {
   }
 }
 
-/* ============ premium: WhatsApp + painel de ativação ============ */
-function openWhatsApp() {
-  const url = 'https://wa.me/' + PREMIUM_WPP + '?text=' + encodeURIComponent(WPP_MSG);
-  const a = document.createElement('a');
-  a.href = url; a.target = '_blank'; a.rel = 'noopener';
-  document.body.appendChild(a); a.click(); a.remove();
-}
- $('#btnWpp').addEventListener('click', openWhatsApp);
-
+/* ============ premium: painel de ativação ============ */
 function renderPremium() {
   const on = isPremium();
   $('#premFree').hidden = on;
   $('#premActive').hidden = !on;
+  $('#devIdBox').textContent = devId;
   const chip = $('#premChip');
   chip.textContent = on ? 'ATIVO' : 'PRO';
   chip.classList.toggle('gold', on);
@@ -600,28 +643,40 @@ function renderPremium() {
   }
 }
 
+/* copia o ID e abre o WhatsApp com a mensagem pronta */
+ $('#btnWpp').addEventListener('click', async () => {
+  const msg =
+    "Olá! Quero ser Premium no NEGRET'Slist (" + WPP_PRICE + ").\n\n" +
+    'Meu ID: ' + devId + '\n\n' +
+    'Aguardando o código de liberação após o Pix.';
+  const ok = await copyText(devId);
+  toast(ok ? 'ID copiado! Cole no WhatsApp se precisar' : 'ID: ' + devId);
+  const a = document.createElement('a');
+  a.href = 'https://wa.me/' + PREMIUM_WPP + '?text=' + encodeURIComponent(msg);
+  a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
 function tryActivate() {
   const el = $('#codeInput'), msg = $('#actMsg');
   const raw = (el.value || '').trim();
   if (!raw) {
-    msg.textContent = 'Digite o código que você recebeu no WhatsApp.';
+    msg.textContent = 'Digite o código de liberação que você recebeu no WhatsApp.';
     msg.className = 'act-msg err';
     el.focus(); buzz(30);
     return;
   }
-  const key = normCode(raw);
-  const valid = PREMIUM_CODES.some(c => normCode(c) === key);
-  if (!valid) {
-    msg.textContent = 'Código inválido. Confira a mensagem que enviamos no WhatsApp.';
+  if (!checkLiberation(raw)) {
+    msg.textContent = 'Código inválido para o ID ' + devId + '. Confira com o suporte.';
     msg.className = 'act-msg err';
     buzz(30);
     return;
   }
-  premium = { active: true, code: raw.toUpperCase(), since: new Date().toISOString() };
+  premium = { active: true, code: libCodeFor(devId), since: new Date().toISOString() };
   savePrem();
   el.value = ''; msg.textContent = ''; msg.className = 'act-msg';
   renderPremium(); buzz(12);
-  toast('Premium ativado neste aparelho');
+  toast('Premium liberado neste aparelho');
 }
  $('#btnActivate').addEventListener('click', tryActivate);
  $('#codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryActivate(); });
@@ -629,7 +684,7 @@ function tryActivate() {
  $('#btnDeactivate').addEventListener('click', () => {
   openConfirm({
     title: 'Desativar Premium',
-    msg: 'O Premium será desativado neste aparelho. Seu código continua válido — dá para ativar de novo quando quiser.',
+    msg: 'O Premium será desativado neste aparelho. Seu ID continua o mesmo — o código de liberação volta a funcionar quando quiser.',
     ok: 'Desativar', danger: true,
     onOk() {
       premium = { active: false };
