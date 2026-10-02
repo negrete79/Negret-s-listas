@@ -1,7 +1,7 @@
 'use strict';
 
 /* ================================================================
-   NEGRET'S list — comportamento do app
+   NEGRET'S list — comportamento do app (versão final)
    Lista offline (localStorage) + exportação PDF (jsPDF cacheado)
    ================================================================ */
 
@@ -513,4 +513,218 @@ function buildExpenses() {
     const div = document.createElement('div');
     div.className = 'exprow' + (cls ? ' ' + cls : '');
     const left = document.createElement('div');
-    const b = document.c
+    const b = document.createElement('b'); b.textContent = t;
+    const sm = document.createElement('small'); sm.textContent = sub;
+    left.append(b, sm);
+    const right = document.createElement('span'); right.className = 'amt'; right.textContent = amt;
+    div.append(left, right);
+    wrap.appendChild(div);
+  });
+
+  if (saved.length) {
+    const p = document.createElement('p');
+    p.className = 'emptynote';
+    p.textContent = 'Arquivadas:';
+    wrap.appendChild(p);
+    saved.forEach(s => {
+      const div = document.createElement('div'); div.className = 'exprow';
+      const left = document.createElement('div');
+      const b = document.createElement('b'); b.textContent = s.name;
+      const sm = document.createElement('small'); sm.textContent = fmtDate(s.date);
+      left.append(b, sm);
+      const right = document.createElement('span'); right.className = 'amt'; right.textContent = brl(sumTotal(s.items));
+      div.append(left, right);
+      wrap.appendChild(div);
+    });
+  }
+}
+
+/* ============ premium / configurações ============ */
+ $('#btnSubscribe').addEventListener('click', () =>
+  toast('Loja de pagamentos indisponível nesta versão de demonstração')
+);
+
+function syncSettings() {
+  $('#swStrike').checked = cfg.strike;
+  $('#swConfirm').checked = cfg.confirmDel;
+  $('#swCount').checked = cfg.countChecked;
+}
+ $('#swStrike').addEventListener('change', e => { cfg.strike = e.target.checked; saveCfg(); render(); });
+ $('#swConfirm').addEventListener('change', e => { cfg.confirmDel = e.target.checked; saveCfg(); });
+ $('#swCount').addEventListener('change', e => { cfg.countChecked = e.target.checked; saveCfg(); render(); });
+
+ $('#btnExample').addEventListener('click', () => {
+  openConfirm({
+    title: 'Restaurar exemplo',
+    msg: 'A lista atual será substituída pelos 8 itens de exemplo (total ' + brl(618.24) + ').',
+    ok: 'Restaurar',
+    onOk() { items = seed(); saveItems(); render(); toast('Itens de exemplo restaurados'); }
+  });
+});
+
+ $('#btnWipe').addEventListener('click', () => {
+  openConfirm({
+    title: 'Apagar todos os dados',
+    msg: 'Lista atual, listas salvas, orçamento e configurações serão removidos. Não dá para desfazer.',
+    ok: 'Apagar tudo', danger: true,
+    onOk() {
+      Object.values(KEYS).forEach(k => localStorage.removeItem(k));
+      items = []; saved = []; cfg = { ...CFG_DEFAULT };
+      render(); toast('Todos os dados foram apagados');
+    }
+  });
+});
+
+/* ============ exportar PDF (funciona offline com o jsPDF cacheado) ============ */
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+async function exportarPDF(listItems, title) {
+  if (!listItems || !listItems.length) {
+    toast('A lista está vazia — nada para exportar');
+    return;
+  }
+
+  let JS = window.jspdf && window.jspdf.jsPDF;
+  if (!JS) {
+    toast('Carregando gerador de PDF…');
+    try { await loadScript(JSPDF_URL); JS = window.jspdf && window.jspdf.jsPDF; } catch (_) {}
+    if (!JS) {
+      toast('PDF indisponível offline. Abra o app online uma vez para cachear o gerador.');
+      return;
+    }
+  }
+
+  const dp = dateParts();
+  const doc = new JS({ unit: 'mm', format: 'a4' });
+  const M = 15, RIGHT = 195;
+  const DARK = [20, 22, 30], MUTED = [138, 143, 168], BLUE = [10, 132, 255];
+
+  /* cabeçalho */
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  doc.setTextColor(...DARK);
+  doc.text(title, M, 20);
+
+  const marc = listItems.filter(i => i.c).length;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text(
+    listItems.length + (listItems.length === 1 ? ' item' : ' itens') + ' • ' +
+    marc + (marc === 1 ? ' selecionado' : ' selecionados'),
+    M, 26.5
+  );
+  doc.setDrawColor(205, 208, 218); doc.setLineWidth(0.2);
+  doc.line(M, 30, RIGHT, 30);
+
+  /* itens */
+  let y = 39.5;
+  doc.setLineHeightFactor(1.35);
+
+  listItems.forEach(it => {
+    if (y > 272) { doc.addPage(); y = 22; }
+
+    const subStr = brlPdf(it.p * it.q);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setTextColor(...(it.c ? MUTED : DARK));
+    const lines = doc.splitTextToSize(it.n, 118); /* nome completo, sempre inteiro */
+    const nameX = M + 9;
+
+    /* checkbox */
+    doc.setDrawColor(...BLUE); doc.setLineWidth(0.35);
+    doc.roundedRect(M, y - 3.6, 4.4, 4.4, 1.1, 1.1);
+    if (it.c) {
+      const cx = M + 2.2, cy = y - 1.4;
+      doc.setLineWidth(0.5);
+      doc.line(cx - 1.1, cy + 0.1, cx - 0.3, cy + 0.95);
+      doc.line(cx - 0.3, cy + 0.95, cx + 1.2, cy - 0.95);
+    }
+
+    doc.text(lines, nameX, y);
+    if (it.c) { /* riscado desenhado à mão (confiável em qualquer versão do jsPDF) */
+      doc.setDrawColor(155, 160, 175); doc.setLineWidth(0.25);
+      lines.forEach((ln, i) => {
+        const w = Math.min(doc.getTextWidth(ln), 118);
+        doc.line(nameX, y + i * 4.9 - 1.25, nameX + w, y + i * 4.9 - 1.25);
+      });
+    }
+    if (it.q > 1) {
+      doc.setTextColor(...MUTED);
+      doc.text('x' + it.q, RIGHT - doc.getTextWidth(subStr) - 3, y, { align: 'right' });
+    }
+    doc.setTextColor(...(it.c ? MUTED : DARK));
+    doc.text(subStr, RIGHT, y, { align: 'right' });
+
+    y += (lines.length - 1) * 4.9 + 8;
+  });
+
+  /* total */
+  if (y > 258) { doc.addPage(); y = 22; }
+  doc.setDrawColor(...DARK); doc.setLineWidth(0.4);
+  doc.line(M, y - 5.5, RIGHT, y - 5.5);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.setTextColor(...DARK);
+  doc.text('TOTAL', M, y);
+  doc.setFontSize(13); doc.setTextColor(...BLUE);
+  doc.text(brlPdf(sumTotal(listItems)), RIGHT, y, { align: 'right' });
+
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.setTextColor(...MUTED);
+  doc.text("NEGRET'Slist " + APP_VERSION + '  •  Gerado em ' + dp.br + ' às ' + hh + ':' + mi, M, y + 8);
+
+  try {
+    doc.save('lista-compras-' + dp.file + '.pdf');
+    toast('PDF gerado com sucesso');
+  } catch (_) {
+    toast('O navegador bloqueou o download do PDF');
+  }
+}
+
+ $('#btnPdfBar').addEventListener('click', () =>
+  exportarPDF(items, 'MINHA LISTA - ' + dateParts().br)
+);
+
+/* ============ instalação PWA ============ */
+const installItem = $('#installItem');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (!matchMedia('(display-mode: standalone)').matches) installItem.hidden = false;
+});
+
+function promptInstall() {
+  if (!deferredPrompt) {
+    toast('Use o menu do navegador → "Instalar app" / "Adicionar à tela inicial"');
+    closeAll();
+    return;
+  }
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(() => {
+    deferredPrompt = null;
+    installItem.hidden = true;
+    closeAll();
+  });
+}
+
+window.addEventListener('appinstalled', () => {
+  installItem.hidden = true;
+  toast('App instalado! Abra pela tela inicial.');
+});
+
+/* ============ service worker (offline) ============ */
+if ('serviceWorker' in navigator &&
+    (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+/* ============ boot ============ */
+ $('#verLabel').textContent = 'Versão ' + APP_VERSION;
+render();
