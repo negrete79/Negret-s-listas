@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Painel do dono — NEGRET'Slist</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#0F1115;color:#EAEAF0;margin:0;padding:20px;max-width:480px;margin-inline:auto}
+  h1{font-size:18px;margin-bottom:4px}
+  .warn{font-size:12px;color:#FFD60A;background:rgba(255,214,10,.08);border:1px solid rgba(255,214,10,.3);border-radius:10px;padding:10px 12px;line-height:1.5;margin-bottom:16px}
+  label{display:block;font-size:12.5px;color:#8A8FA8;font-weight:600;margin-bottom:6px}
+  input{width:100%;height:52px;background:#1C1F2B;border:1px solid #232631;border-radius:12px;padding:0 14px;font-size:19px;font-weight:800;letter-spacing:.1em;text-align:center;text-transform:uppercase;color:#EAEAF0;box-sizing:border-box}
+  input:focus{outline:none;border-color:#0A84FF}
+  button{width:100%;height:50px;border:none;border-radius:12px;background:#0A84FF;color:#fff;font-weight:700;font-size:15px;cursor:pointer;margin-top:12px}
+  button.ghost{background:#1C1F2B;color:#0A84FF;border:1px solid rgba(10,132,255,.45)}
+  .pidbox{border:2px dashed #3A3F52;border-radius:14px;background:#14161D;padding:18px 10px;text-align:center;font-size:28px;font-weight:800;letter-spacing:.06em;margin-top:16px;min-height:66px}
+  .hidden{display:none}
+  .hint{font-size:12px;color:#8A8FA8;line-height:1.6;margin-top:14px}
+  .msg{font-size:13px;color:#FF6B60;margin-top:8px;min-height:17px;text-align:center}
+</style>
+</head>
+<body>
+<h1>Painel do dono — liberação Premium</h1>
+<div class="warn">Arquivo privado: NÃO publique no repositório. Guarde-o no seu celular/PC. A chave secreta aqui deve ser IDÊNTICA à do app.js.</div>
+
+<label for="inId">ID enviado pelo cliente (ex.: NGRT-AB2D-EF3G)</label>
+<input id="inId" type="text" placeholder="NGRT-XXXX-XXXX" autocomplete="off" maxlength="20"/>
+<p class="msg" id="msg"></p>
+
+<button id="btnGen">GERAR CÓDIGO DE LIBERAÇÃO</button>
+
+<div class="pidbox hidden" id="outBox"></div>
+<button class="ghost hidden" id="btnCopy">COPIAR CÓDIGO</button>
+
+<p class="hint">
+Fluxo: o cliente manda o ID pelo WhatsApp → você cobra o Pix de R$ 9,90 → gera o código aqui → responde na conversa com o código.<br><br>
+O cliente digita o código em PREMIUM → "Já tem código?" → LIBERAR ACESSO. Funciona offline, pois o app recalcula o mesmo código a partir do ID dele.
+</p>
+
+<script>
+'use strict';
+/* MESMA CHAVE do app.js — troque nos dois juntos */
+const ACT_SALT = 'NEGRET-7QX9-MISTURA-K4M';
+
+const normCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function fnv1a(str) {
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+function libCodeFor(id) {
+  const key = normCode(id);
+  const h1 = fnv1a(ACT_SALT + '|' + key);
+  const h2 = fnv1a(key + '|' + ACT_SALT + '|' + h1);
+  const p1 = h1.toString(36).toUpperCase().padStart(6, '0').slice(0, 4);
+  const p2 = h2.toString(36).toUpperCase().padStart(6, '0').slice(0, 4);
+  return p1 + '-' + p2;
+}
+
+let current = '';
+const inId = document.getElementById('inId');
+const msg = document.getElementById('msg');
+const outBox = document.getElementById('outBox');
+const btnCopy = document.getElementById('btnCopy');
+
+document.getElementById('btnGen').addEventListener('click', () => {
+  const raw = (inId.value || '').trim().toUpperCase();
+  if (!/^NGRT-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(raw)) {
+    msg.textContent = 'ID inválido. O formato é NGRT-XXXX-XXXX (copie exatamente o que o cliente mandou).';
+    outBox.classList.add('hidden'); btnCopy.classList.add('hidden');
+    return;
+  }
+  msg.textContent = '';
+  current = libCodeFor(raw);
+  outBox.textContent = current;
+  outBox.classList.remove('hidden');
+  btnCopy.classList.remove('hidden');
+});
+
+btnCopy.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(current); btnCopy.textContent = 'COPIADO!'; }
+  catch (_) { btnCopy.textContent = current; }
+  setTimeout(() => btnCopy.textContent = 'COPIAR CÓDIGO', 1800);
+});
+</script>
+</body>
+</html>
