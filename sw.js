@@ -1,5 +1,5 @@
 /* NEGRET'Slist — Service Worker: cache-first, 100% offline após a 1ª visita */
-const CACHE = 'negretslist-v5';
+const CACHE = 'negretslist-v7';
 const CORE = [
   './', './index.html', './app.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'
