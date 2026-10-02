@@ -2,8 +2,8 @@
 
 /* ================================================================
    NEGRET'S list — comportamento do app (versão completa)
-   Lista offline (localStorage) + exportação PDF (jsPDF cacheado)
-   + Premium: ID exclusivo do aparelho → WhatsApp → código de liberação
+   Lista offline + PDF com identidade visual + teste de 7 dias
+   + Premium VITALÍCIO (R$ 50) via ID → WhatsApp → código de liberação
    ================================================================ */
 
 const APP_VERSION = '1.8.13';
@@ -11,14 +11,14 @@ const JSPDF_URL   = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.um
 const KEYS        = { items: 'ench_v2', saved: 'ench_saved', cfg: 'ench_cfg', prem: 'ench_prem' };
 const CFG_DEFAULT = { sort: 'added', strike: true, confirmDel: true, countChecked: false, budget: 0 };
 
-/* ============ Premium: venda via WhatsApp + código de liberação ============ */
-const PREMIUM_WPP = '5531982517147'; /* 55 + DDD 31 + 982517147 */
-const WPP_PRICE   = 'R$ 9,90/mês';
-const FREE_LIST_LIMIT = 3; /* listas salvas permitidas no plano gratuito */
+/* ============ Premium e teste ============ */
+const PREMIUM_WPP = '5531982517147';          /* 55 + DDD 31 + 982517147 */
+const PREMIUM_PRICE = 'R$ 50,00';             /* vitalício */
+const TRIAL_DAYS = 7;                          /* teste gratuito */
+const TRIAL_LIST_LIMIT = 5;                    /* listas salvas durante o teste */
+const FREE_LIST_LIMIT = 3;                     /* listas salvas após o teste */
 
-/* CHAVE SECRETA da ativação. O código de liberação de cada cliente é
-   calculado a partir do ID dele + esta chave. Se trocá-la aqui, troque
-   TAMBÉM no admin.html (painel do dono), senão os códigos não baterão. */
+/* CHAVE SECRETA da ativação — deve ser IDÊNTICA à do admin.html */
 const ACT_SALT = 'NEGRET-7QX9-MISTURA-K4M';
 
 /* ============ utilitários ============ */
@@ -28,7 +28,6 @@ const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toL
 const normCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const buzz = (ms = 8) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
 const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-/* formato próprio para o PDF (evita espaços especiais do Intl dentro do jsPDF) */
 const brlPdf = v => 'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 function dateParts(d) {
@@ -69,14 +68,13 @@ async function copyText(t) {
 }
 
 /* ============ identidade do aparelho (ID exclusivo do cliente) ============ */
-const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; /* sem I, O, 0 e 1 (evita confusão) */
+const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function genBlock(n) {
   let s = '';
   for (let i = 0; i < n; i++) s += ID_ALPHABET[Math.floor(Math.random() * ID_ALPHABET.length)];
   return s;
 }
-/* gerado uma única vez por aparelho e guardado para sempre
-   (não é apagado nem em "Apagar tudo": é a identidade do cliente) */
+/* gerado uma única vez por aparelho; sobrevive a "Apagar tudo" */
 function ensureDevId() {
   let id = null;
   try { id = localStorage.getItem('ench_devid'); } catch (_) {}
@@ -87,6 +85,18 @@ function ensureDevId() {
   return id;
 }
 const devId = ensureDevId();
+
+/* ============ teste de 7 dias (começa na 1ª abertura; sobrevive a "Apagar tudo") ============ */
+let trialStart = null;
+try { trialStart = localStorage.getItem('ench_trial'); } catch (_) {}
+if (!trialStart) {
+  trialStart = new Date().toISOString();
+  try { localStorage.setItem('ench_trial', trialStart); } catch (_) {}
+}
+function trialDaysLeft() {
+  const ms = Date.now() - new Date(trialStart).getTime();
+  return Math.max(0, Math.min(TRIAL_DAYS, Math.ceil((TRIAL_DAYS * 86400000 - ms) / 86400000)));
+}
 
 /* código de liberação = cálculo determinístico do ID + chave secreta */
 function fnv1a(str) {
@@ -145,6 +155,8 @@ const saveSaved = () => store(KEYS.saved, saved);
 const saveCfg   = () => store(KEYS.cfg, cfg);
 const savePrem  = () => store(KEYS.prem, premium);
 const isPremium = () => !!(premium && premium.active);
+const onTrial   = () => !isPremium() && trialDaysLeft() > 0;
+const savedLimit = () => isPremium() ? Infinity : (onTrial() ? TRIAL_LIST_LIMIT : FREE_LIST_LIMIT);
 const sumTotal  = (list, onlyChecked) =>
   list.reduce((s, i) => (onlyChecked && !i.c) ? s : s + i.p * i.q, 0);
 
@@ -186,7 +198,7 @@ function itemRow(it) {
 
   const name = document.createElement('div');
   name.className = 'name';
-  name.textContent = it.n; /* quebra em várias linhas naturalmente — nunca corta */
+  name.textContent = it.n;
 
   const right = document.createElement('div');
   right.className = 'price';
@@ -457,13 +469,13 @@ function snapshotCurrent(name) {
   saveSaved();
 }
 
-/* limite do plano gratuito: 3 listas salvas (Premium libera ilimitadas) */
+/* limite por plano: Premium ilimitado • teste 5 • gratuito 3 */
 function checkListQuota() {
-  if (isPremium() || saved.length < FREE_LIST_LIMIT) return true;
+  if (isPremium() || saved.length < savedLimit()) return true;
   openConfirm({
-    title: 'Limite do plano gratuito',
-    msg: 'No plano gratuito você pode manter até ' + FREE_LIST_LIMIT +
-         ' listas salvas. O Premium libera listas ilimitadas.',
+    title: 'Limite do plano atual',
+    msg: 'Seu plano permite até ' + savedLimit() + ' listas salvas. O Premium vitalício (' +
+         PREMIUM_PRICE + ') libera listas ilimitadas para sempre.',
     ok: 'Ver Premium',
     onOk() { renderPremium(); openSheet('sheetPremium'); }
   });
@@ -632,21 +644,48 @@ function renderPremium() {
   $('#premFree').hidden = on;
   $('#premActive').hidden = !on;
   $('#devIdBox').textContent = devId;
+
   const chip = $('#premChip');
-  chip.textContent = on ? 'ATIVO' : 'PRO';
   chip.classList.toggle('gold', on);
   if (on) {
+    chip.textContent = 'ATIVO';
+  } else if (onTrial()) {
+    chip.textContent = 'TRIAL • ' + trialDaysLeft() + 'd';
+  } else {
+    chip.textContent = 'PRO';
+  }
+
+  if (!on) {
+    const pill = $('#trialPill');
+    const left = trialDaysLeft();
+    if (left > 0) {
+      pill.textContent = 'TESTE • ' + left + (left === 1 ? ' DIA RESTANTE' : ' DIAS RESTANTES');
+      pill.classList.remove('over');
+      $('#premSub').textContent =
+        'Você está no teste gratuito de ' + TRIAL_DAYS + ' dias. Ative o Premium e libere tudo de forma VITALÍCIA com um único Pix.';
+    } else {
+      pill.textContent = 'TESTE ENCERRADO';
+      pill.classList.add('over');
+      $('#premSub').textContent =
+        'Seu teste de ' + TRIAL_DAYS + ' dias acabou. Ative o Premium vitalício e libere tudo para sempre.';
+    }
+    $('#planLine').textContent =
+      'Plano atual: ' + (left > 0 ? 'TESTE' : 'GRATUITO') +
+      ' — até ' + savedLimit() + ' listas salvas' +
+      (onTrial() ? ' • faltam ' + left + ' dias' : '');
+  } else {
     const d = premium.since ? new Date(premium.since) : null;
     $('#premMeta').textContent =
       'Ativado em ' + (d ? dateParts(d).br : '—') +
-      ' • código ' + (premium.code || '—');
+      ' • código ' + (premium.code || '—') +
+      ' • acesso VITALÍCIO';
   }
 }
 
 /* copia o ID e abre o WhatsApp com a mensagem pronta */
  $('#btnWpp').addEventListener('click', async () => {
   const msg =
-    "Olá! Quero ser Premium no NEGRET'Slist (" + WPP_PRICE + ").\n\n" +
+    "Olá! Quero ser Premium no NEGRET'Slist (" + PREMIUM_PRICE + " — acesso vitalício).\n\n" +
     'Meu ID: ' + devId + '\n\n' +
     'Aguardando o código de liberação após o Pix.';
   const ok = await copyText(devId);
@@ -672,11 +711,12 @@ function tryActivate() {
     buzz(30);
     return;
   }
-  premium = { active: true, code: libCodeFor(devId), since: new Date().toISOString() };
+  /* ativação VITALÍCIA: sem validade, sem renovação */
+  premium = { active: true, code: libCodeFor(devId), since: new Date().toISOString(), lifetime: true };
   savePrem();
   el.value = ''; msg.textContent = ''; msg.className = 'act-msg';
   renderPremium(); buzz(12);
-  toast('Premium liberado neste aparelho');
+  toast('Premium vitalício liberado neste aparelho');
 }
  $('#btnActivate').addEventListener('click', tryActivate);
  $('#codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryActivate(); });
@@ -727,7 +767,7 @@ function syncSettings() {
   });
 });
 
-/* ============ exportar PDF (funciona offline com o jsPDF cacheado) ============ */
+/* ============ exportar PDF — com identidade visual NEGRET'S ============ */
 function loadScript(src) {
   return new Promise((res, rej) => {
     const s = document.createElement('script');
@@ -752,84 +792,154 @@ async function exportarPDF(listItems, title) {
     }
   }
 
-  const dp = dateParts();
   const doc = new JS({ unit: 'mm', format: 'a4' });
-  const M = 15, RIGHT = 195;
-  const DARK = [20, 22, 30], MUTED = [138, 143, 168], BLUE = [10, 132, 255];
+  const W = 210, M = 15, RIGHT = 195;
+  const BLUE  = [10, 132, 255];
+  const DARK  = [22, 24, 32];
+  const MUTED = [128, 134, 156];
+  const LIGHT = [242, 245, 250];
+  const GRAY  = [188, 194, 210];
+  const WHITE = [255, 255, 255];
 
-  /* cabeçalho */
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  const dp = dateParts();
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+
+  /* ---------- cabeçalho azul com o logo ---------- */
+  doc.setFillColor(...BLUE);
+  doc.rect(0, 0, W, 34, 'F');
+
+  /* quadrado branco arredondado com o check azul (ícone do app) */
+  doc.setFillColor(...WHITE);
+  doc.roundedRect(M, 10, 14, 14, 3.2, 3.2, 'F');
+  doc.setDrawColor(...BLUE);
+  doc.setLineWidth(1.7);
+  try { doc.setLineCap('round'); } catch (_) {}
+  doc.line(M + 3.9, 17.4, M + 6.1, 19.8);
+  doc.line(M + 6.1, 19.8, M + 10.3, 14.2);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(...WHITE);
+  doc.text("NEGRET'Slist", M + 19, 17.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text('Lista de compras inteligente', M + 19, 22.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(dp.br, RIGHT, 17.5, { align: 'right' });
+
+  /* ---------- título ---------- */
+  let y = 46;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
   doc.setTextColor(...DARK);
-  doc.text(title, M, 20);
+  doc.text(title, M, y);
 
   const marc = listItems.filter(i => i.c).length;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
   doc.setTextColor(...MUTED);
   doc.text(
     listItems.length + (listItems.length === 1 ? ' item' : ' itens') + ' • ' +
     marc + (marc === 1 ? ' selecionado' : ' selecionados'),
-    M, 26.5
+    M, y + 5.5
   );
-  doc.setDrawColor(205, 208, 218); doc.setLineWidth(0.2);
-  doc.line(M, 30, RIGHT, 30);
+  doc.setDrawColor(...GRAY);
+  doc.setLineWidth(0.2);
+  doc.line(M, y + 9, RIGHT, y + 9);
+  y += 16.5;
 
-  /* itens */
-  let y = 39.5;
-  doc.setLineHeightFactor(1.35);
+  /* ---------- itens com zebra ---------- */
+  doc.setLineHeightFactor(1.3);
 
-  listItems.forEach(it => {
-    if (y > 272) { doc.addPage(); y = 22; }
+  listItems.forEach((it, idx) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const lines = doc.splitTextToSize(it.n, 120); /* nome completo, sempre inteiro */
+    const rh = Math.max(9, lines.length * 5 + 5);
 
-    const subStr = brlPdf(it.p * it.q);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-    doc.setTextColor(...(it.c ? MUTED : DARK));
-    const lines = doc.splitTextToSize(it.n, 118); /* nome completo, sempre inteiro */
-    const nameX = M + 9;
+    if (y - 5 + rh > 266) { doc.addPage(); y = 22; }
+
+    /* fundo alternado */
+    if (idx % 2 === 0) {
+      doc.setFillColor(...LIGHT);
+      doc.rect(12, y - 5.4, W - 24, rh, 'F');
+    }
 
     /* checkbox */
-    doc.setDrawColor(...BLUE); doc.setLineWidth(0.35);
-    doc.roundedRect(M, y - 3.6, 4.4, 4.4, 1.1, 1.1);
+    const cx = M + 2.4, cy = y - 1.7;
     if (it.c) {
-      const cx = M + 2.2, cy = y - 1.4;
-      doc.setLineWidth(0.5);
-      doc.line(cx - 1.1, cy + 0.1, cx - 0.3, cy + 0.95);
-      doc.line(cx - 0.3, cy + 0.95, cx + 1.2, cy - 0.95);
+      doc.setFillColor(...BLUE);
+      doc.roundedRect(M, y - 4.1, 4.8, 4.8, 1.3, 1.3, 'F');
+      doc.setDrawColor(...WHITE);
+      doc.setLineWidth(0.55);
+      doc.line(cx - 1.25, cy + 0.15, cx - 0.35, cy + 1.05);
+      doc.line(cx - 0.35, cy + 1.05, cx + 1.35, cy - 1.05);
+    } else {
+      doc.setDrawColor(...GRAY);
+      doc.setLineWidth(0.4);
+      doc.roundedRect(M, y - 4.1, 4.8, 4.8, 1.3, 1.3, 'S');
     }
 
+    /* nome */
+    const nameX = M + 9.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...(it.c ? MUTED : DARK));
     doc.text(lines, nameX, y);
-    if (it.c) { /* riscado desenhado à mão (confiável em qualquer versão do jsPDF) */
-      doc.setDrawColor(155, 160, 175); doc.setLineWidth(0.25);
+    if (it.c) {
+      doc.setDrawColor(168, 174, 192);
+      doc.setLineWidth(0.28);
       lines.forEach((ln, i) => {
-        const w = Math.min(doc.getTextWidth(ln), 118);
-        doc.line(nameX, y + i * 4.9 - 1.25, nameX + w, y + i * 4.9 - 1.25);
+        const w = Math.min(doc.getTextWidth(ln), 120);
+        doc.line(nameX, y + i * 4.8 - 1.2, nameX + w, y + i * 4.8 - 1.2);
       });
     }
+
+    /* quantidade + subtotal */
+    const subStr = brlPdf(it.p * it.q);
     if (it.q > 1) {
-      doc.setTextColor(...MUTED);
-      doc.text('x' + it.q, RIGHT - doc.getTextWidth(subStr) - 3, y, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...BLUE);
+      const qStr = 'x' + it.q;
+      doc.text(qStr, RIGHT - doc.getTextWidth(subStr) - doc.getTextWidth(qStr) - 3.5, y, { align: 'right' });
     }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
     doc.setTextColor(...(it.c ? MUTED : DARK));
     doc.text(subStr, RIGHT, y, { align: 'right' });
 
-    y += (lines.length - 1) * 4.9 + 8;
+    y += rh;
   });
 
-  /* total */
-  if (y > 258) { doc.addPage(); y = 22; }
-  doc.setDrawColor(...DARK); doc.setLineWidth(0.4);
-  doc.line(M, y - 5.5, RIGHT, y - 5.5);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
-  doc.setTextColor(...DARK);
-  doc.text('TOTAL', M, y);
-  doc.setFontSize(13); doc.setTextColor(...BLUE);
-  doc.text(brlPdf(sumTotal(listItems)), RIGHT, y, { align: 'right' });
+  /* ---------- faixa do TOTAL ---------- */
+  if (y + 22 > 266) { doc.addPage(); y = 22; }
+  y += 4;
+  doc.setFillColor(...BLUE);
+  doc.roundedRect(M, y, RIGHT - M, 14, 3, 3, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...WHITE);
+  doc.text('TOTAL', M + 5, y + 9);
+  doc.setFontSize(13);
+  doc.text(brlPdf(sumTotal(listItems)), RIGHT - 5, y + 9.4, { align: 'right' });
 
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mi = String(now.getMinutes()).padStart(2, '0');
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  doc.setTextColor(...MUTED);
-  doc.text("NEGRET'Slist " + APP_VERSION + '  •  Gerado em ' + dp.br + ' às ' + hh + ':' + mi, M, y + 8);
+  /* ---------- rodapé em todas as páginas ---------- */
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(228, 231, 238);
+    doc.setLineWidth(0.2);
+    doc.line(M, 284.5, RIGHT, 284.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...MUTED);
+    doc.text("NEGRET'Slist " + APP_VERSION + '  •  Criado por Negret', M, 289);
+    doc.text('Gerado em ' + dp.br + ' às ' + hh + ':' + mi + '  •  Pág. ' + p + '/' + pages, RIGHT, 289, { align: 'right' });
+  }
 
   try {
     doc.save('lista-compras-' + dp.file + '.pdf');
