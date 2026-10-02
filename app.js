@@ -2,8 +2,9 @@
 
 /* ================================================================
    NEGRET'S list — comportamento do app (versão completa)
-   Lista offline + PDF com identidade visual + teste de 7 dias
-   + Premium VITALÍCIO (R$ 50) via ID → WhatsApp → código de liberação
+   Lista offline + PDF com identidade visual
+   Modelo comercial: 7 dias de teste com TUDO liberado →
+   depois o app trava inteiro → paywall vitalício (R$ 50)
    ================================================================ */
 
 const APP_VERSION = '1.8.13';
@@ -13,10 +14,8 @@ const CFG_DEFAULT = { sort: 'added', strike: true, confirmDel: true, countChecke
 
 /* ============ Premium e teste ============ */
 const PREMIUM_WPP = '5531982517147';          /* 55 + DDD 31 + 982517147 */
-const PREMIUM_PRICE = 'R$ 50,00';             /* vitalício */
-const TRIAL_DAYS = 7;                          /* teste gratuito */
-const TRIAL_LIST_LIMIT = 5;                    /* listas salvas durante o teste */
-const FREE_LIST_LIMIT = 3;                     /* listas salvas após o teste */
+const PREMIUM_PRICE = 'R$ 50,00';             /* vitalício, pagamento único */
+const TRIAL_DAYS = 7;                          /* teste com tudo liberado */
 
 /* CHAVE SECRETA da ativação — deve ser IDÊNTICA à do admin.html */
 const ACT_SALT = 'NEGRET-7QX9-MISTURA-K4M';
@@ -156,7 +155,8 @@ const saveCfg   = () => store(KEYS.cfg, cfg);
 const savePrem  = () => store(KEYS.prem, premium);
 const isPremium = () => !!(premium && premium.active);
 const onTrial   = () => !isPremium() && trialDaysLeft() > 0;
-const savedLimit = () => isPremium() ? Infinity : (onTrial() ? TRIAL_LIST_LIMIT : FREE_LIST_LIMIT);
+/* travado = teste acabou e não pagou: o app inteiro bloqueia */
+const appLocked = () => !isPremium() && trialDaysLeft() === 0;
 const sumTotal  = (list, onlyChecked) =>
   list.reduce((s, i) => (onlyChecked && !i.c) ? s : s + i.p * i.q, 0);
 
@@ -171,7 +171,20 @@ const ICONS = {
 const listEl = $('#list'), listCard = $('#listCard'), emptyState = $('#emptyState'),
       emptyTitle = $('#emptyTitle'), emptyMsg = $('#emptyMsg'),
       countInfo = $('#countInfo'), totalValue = $('#totalValue'), totalLabel = $('#totalLabel'),
-      budgetHint = $('#budgetHint'), scrim = $('#scrim'), drawer = $('#drawer'), toastEl = $('#toast');
+      budgetHint = $('#budgetHint'), scrim = $('#scrim'), drawer = $('#drawer'), toastEl = $('#toast'),
+      lockScreen = $('#lockScreen');
+
+/* ============ trava do app (fim do teste sem Premium) ============ */
+function updateLock() {
+  lockScreen.hidden = !appLocked();
+}
+function openPaywall(focusCode) {
+  renderPremium();
+  openSheet('sheetPremium');
+  if (focusCode) setTimeout(() => $('#codeInput').focus(), 360);
+}
+ $('#btnLockBuy').addEventListener('click', () => openPaywall(false));
+ $('#btnLockCode').addEventListener('click', () => openPaywall(true));
 
 /* ============ render ============ */
 function sortItems(arr) {
@@ -469,30 +482,23 @@ function snapshotCurrent(name) {
   saveSaved();
 }
 
-/* limite por plano: Premium ilimitado • teste 5 • gratuito 3 */
+/* teste e Premium: sem limites. (Quem está travado nem chega aqui —
+   a tela de bloqueio cobre o app inteiro.) */
 function checkListQuota() {
-  if (isPremium() || saved.length < savedLimit()) return true;
-  openConfirm({
-    title: 'Limite do plano atual',
-    msg: 'Seu plano permite até ' + savedLimit() + ' listas salvas. O Premium vitalício (' +
-         PREMIUM_PRICE + ') libera listas ilimitadas para sempre.',
-    ok: 'Ver Premium',
-    onOk() { renderPremium(); openSheet('sheetPremium'); }
-  });
-  return false;
+  return isPremium() || onTrial();
 }
 
  $('#btnNewSkip').addEventListener('click', () => {
   items = []; saveItems(); render(); closeAll(); toast('Nova lista criada');
 });
  $('#btnNewSave').addEventListener('click', () => {
-  if (!checkListQuota()) return;
+  if (!checkListQuota()) { openPaywall(false); return; }
   snapshotCurrent($('#newListName').value.trim() || null);
   items = []; saveItems(); render(); closeAll(); toast('Lista salva e nova lista criada');
 });
  $('#btnSaveCurrent').addEventListener('click', () => {
   if (!items.length) { toast('A lista atual está vazia'); return; }
-  if (!checkListQuota()) return;
+  if (!checkListQuota()) { openPaywall(false); return; }
   snapshotCurrent($('#saveName').value.trim() || null);
   $('#saveName').value = '';
   buildListsSheet(); toast('Lista salva com sucesso'); buzz(10);
@@ -662,17 +668,15 @@ function renderPremium() {
       pill.textContent = 'TESTE • ' + left + (left === 1 ? ' DIA RESTANTE' : ' DIAS RESTANTES');
       pill.classList.remove('over');
       $('#premSub').textContent =
-        'Você está no teste gratuito de ' + TRIAL_DAYS + ' dias. Ative o Premium e libere tudo de forma VITALÍCIA com um único Pix.';
+        'Você está no teste gratuito de ' + TRIAL_DAYS + ' dias com tudo liberado. ' +
+        'Ao terminar, o app bloqueia — ative o Premium VITALÍCIO com um único Pix de ' + PREMIUM_PRICE + '.';
     } else {
       pill.textContent = 'TESTE ENCERRADO';
       pill.classList.add('over');
       $('#premSub').textContent =
-        'Seu teste de ' + TRIAL_DAYS + ' dias acabou. Ative o Premium vitalício e libere tudo para sempre.';
+        'Seu teste de ' + TRIAL_DAYS + ' dias acabou e o app está bloqueado. ' +
+        'Ative o Premium vitalício (' + PREMIUM_PRICE + ', pagamento único) para liberar tudo para sempre.';
     }
-    $('#planLine').textContent =
-      'Plano atual: ' + (left > 0 ? 'TESTE' : 'GRATUITO') +
-      ' — até ' + savedLimit() + ' listas salvas' +
-      (onTrial() ? ' • faltam ' + left + ' dias' : '');
   } else {
     const d = premium.since ? new Date(premium.since) : null;
     $('#premMeta').textContent =
@@ -715,7 +719,7 @@ function tryActivate() {
   premium = { active: true, code: libCodeFor(devId), since: new Date().toISOString(), lifetime: true };
   savePrem();
   el.value = ''; msg.textContent = ''; msg.className = 'act-msg';
-  renderPremium(); buzz(12);
+  renderPremium(); updateLock(); buzz(12);
   toast('Premium vitalício liberado neste aparelho');
 }
  $('#btnActivate').addEventListener('click', tryActivate);
@@ -728,7 +732,7 @@ function tryActivate() {
     ok: 'Desativar', danger: true,
     onOk() {
       premium = { active: false };
-      savePrem(); renderPremium();
+      savePrem(); renderPremium(); updateLock();
       toast('Premium desativado');
     }
   });
@@ -761,7 +765,7 @@ function syncSettings() {
     onOk() {
       Object.values(KEYS).forEach(k => localStorage.removeItem(k));
       items = []; saved = []; cfg = { ...CFG_DEFAULT }; premium = { active: false };
-      render(); renderPremium();
+      render(); renderPremium(); updateLock();
       toast('Todos os dados foram apagados');
     }
   });
@@ -862,7 +866,6 @@ async function exportarPDF(listItems, title) {
 
     if (y - 5 + rh > 266) { doc.addPage(); y = 22; }
 
-    /* fundo alternado */
     if (idx % 2 === 0) {
       doc.setFillColor(...LIGHT);
       doc.rect(12, y - 5.4, W - 24, rh, 'F');
@@ -991,3 +994,4 @@ if ('serviceWorker' in navigator &&
  $('#verLabel').textContent = 'Versão ' + APP_VERSION;
 render();
 renderPremium();
+updateLock();
