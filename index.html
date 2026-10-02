@@ -40,6 +40,22 @@ body.locked{overflow:hidden}
   #app{border-inline:1px solid #1A1D27;box-shadow:0 0 80px rgba(0,0,0,.55)}
 }
 
+/* ---------- TELA DE BLOQUEIO (fim do teste) ---------- */
+#lockScreen{position:fixed;inset:0;z-index:70;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:26px;overflow-y:auto}
+@media(min-width:520px){#lockScreen{padding-inline:calc(50vw - 240px + 26px)}}
+.lock-card{width:100%;max-width:360px;display:flex;flex-direction:column;align-items:center}
+.lock-card .crown{width:64px;height:64px;border-radius:18px;background:rgba(255,214,10,.14);display:grid;place-items:center;color:var(--gold);margin-bottom:16px}
+.lock-card .crown svg{width:34px;height:34px;fill:currentColor}
+.lock-card h2{font-size:20px;margin-bottom:8px}
+.lock-card .lsub{font-size:13.5px;color:var(--muted);line-height:1.6;margin-bottom:16px}
+.lock-card .lperks{list-style:none;text-align:left;margin-bottom:18px;width:100%}
+.lock-card .lperks li{display:flex;gap:10px;align-items:center;font-size:14px;padding:6px 0}
+.lock-card .lperks svg{width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.lock-price{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-bottom:2px}
+.lock-price small{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.btn.giant{width:100%;height:54px;font-size:15.5px;margin-top:16px;border-radius:14px}
+.lock-alt{margin-top:14px;color:var(--muted);font-size:14px;font-weight:600;text-decoration:underline}
+
 /* ---------- topo ---------- */
 .topbar{position:sticky;top:0;z-index:30}
 header{position:relative;background:var(--blue);height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
@@ -231,6 +247,23 @@ main{padding:2px 12px 150px}
 </style>
 </head>
 <body>
+
+<!-- TELA DE BLOQUEIO: aparece quando o teste de 7 dias termina -->
+<div id="lockScreen" hidden>
+  <div class="lock-card">
+    <div class="crown"><svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM12 3l-4.5 5L4 4.5V15h16V4.5L16.5 8 12 3z"/></svg></div>
+    <h2>Seu teste de 7 dias terminou</h2>
+    <p class="lsub">Para continuar criando listas e exportando PDFs, ative o acesso vitalício — pagamento único, sem mensalidade.</p>
+    <ul class="lperks">
+      <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Listas e PDFs ilimitados</li>
+      <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Orçamento e despesas completos</li>
+      <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Funciona offline, para sempre</li>
+    </ul>
+    <p class="lock-price">R$ 50,00<small>pagamento único • acesso VITALÍCIO</small></p>
+    <button class="btn primary giant" id="btnLockBuy">SEJA PREMIUM VITALÍCIO</button>
+    <button class="lock-alt" id="btnLockCode">Já tenho um código</button>
+  </div>
+</div>
 
 <div id="app">
   <div class="topbar">
@@ -465,8 +498,7 @@ main{padding:2px 12px 150px}
         <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Orçamento com alertas inteligentes</li>
         <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Sem anúncios, para sempre</li>
       </ul>
-      <p class="price-tag" style="font-size:22px;font-weight:800">R$ 50,00 <small style="font-size:12px;color:var(--muted);font-weight:500">— vitalício, sem mensalidade</small></p>
-      <p class="act-meta" id="planLine"></p>
+      <p style="font-size:22px;font-weight:800">R$ 50,00 <small style="font-size:12px;color:var(--muted);font-weight:500">— vitalício, sem mensalidade</small></p>
 
       <p class="pid-label">SEU ID EXCLUSIVO</p>
       <div class="pidbox" id="devIdBox">NGRT-····-····</div>
