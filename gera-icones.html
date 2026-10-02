@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gerar ícones — NEGRET'Slist</title>
+<style>
+  body{font-family:system-ui;background:#0F1115;color:#EAEAF0;margin:0;padding:24px;max-width:520px;margin-inline:auto}
+  h1{font-size:20px} p{color:#8A8FA8;font-size:14px;line-height:1.6}
+  .row{display:flex;gap:14px;align-items:center;background:#181A22;border:1px solid #232631;border-radius:14px;padding:14px;margin:12px 0}
+  canvas{width:72px;height:72px;border-radius:14px}
+  .info b{display:block;font-size:14px} .info span{font-size:12px;color:#8A8FA8}
+  button{width:100%;height:48px;border:none;border-radius:12px;background:#0A84FF;color:#fff;font-weight:700;font-size:15px;cursor:pointer;margin-top:6px}
+  button.ghost{background:#1C1F2B;color:#0A84FF;border:1px solid rgba(10,132,255,.45)}
+</style>
+</head>
+<body>
+<h1>Gerar ícones do app</h1>
+<p>Baixe os 3 PNGs e suba-os para a raiz do repositório, junto com o index.html. Depois apague este arquivo do repositório.</p>
+<div class="row"><canvas id="c192" width="192" height="192"></canvas><div class="info"><b>icon-192.png</b><span>Ícone principal (obrigatório)</span></div></div>
+<div class="row"><canvas id="c512" width="512" height="512"></canvas><div class="info"><b>icon-512.png</b><span>Alta resolução (obrigatório)</span></div></div>
+<div class="row"><canvas id="cmask" width="512" height="512"></canvas><div class="info"><b>icon-maskable-512.png</b><span>Versão maskable (círculo do Android)</span></div></div>
+<button id="btnAll">Baixar os 3 ícones</button>
+
+<script>
+function paint(id, maskable){
+  const c = document.getElementById(id), x = c.getContext('2d'), s = c.width;
+  x.fillStyle = '#0A84FF';
+  if (maskable) { x.fillRect(0, 0, s, s); }
+  else {
+    const r = 112 * s / 512;
+    x.beginPath();
+    if (x.roundRect) x.roundRect(0, 0, s, s, r); else x.rect(0, 0, s, s);
+    x.fill();
+  }
+  x.save();
+  x.translate(s/2, s/2);
+  const k = maskable ? 0.62 : 1;
+  x.scale(k*s/512, k*s/512);
+  x.translate(-256, -256);
+  x.strokeStyle = '#fff'; x.lineWidth = 44; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.beginPath(); x.moveTo(150, 268); x.lineTo(224, 342); x.lineTo(372, 170); x.stroke();
+  x.restore();
+}
+paint('c192'); paint('c512'); paint('cmask', true);
+
+function dl(id, name){
+  document.getElementById(id).toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  }, 'image/png');
+}
+document.getElementById('btnAll').onclick = () => {
+  dl('c192', 'icon-192.png');
+  setTimeout(() => dl('c512', 'icon-512.png'), 600);
+  setTimeout(() => dl('cmask', 'icon-maskable-512.png'), 1200);
+};
+</script>
+</body>
+</html>
