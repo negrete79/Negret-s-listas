@@ -26,7 +26,7 @@
 <div id="rows"></div>
 <div id="verdict" class="bad">Analisando…</div>
 <button id="btnInstall" hidden>INSTALAR AGORA</button>
-<p class="tip">Importante: abra esta página pelo endereço publicado (https://…github.io/…/diagnostico.html), nunca como arquivo local — ela testa o que está no repositório.</p>
+<p class="tip">Dica: se o Service Worker acabou de ser registrado, aguarde 10 segundos e recarregue esta página — o Chrome só libera o convite com a página já controlada pelo SW.</p>
 
 <script>
 'use strict';
@@ -62,22 +62,22 @@ function verdict(){
     v.className = 'good'; v.textContent = 'TUDO CERTO — toque em INSTALAR AGORA acima (ou ⋮ → Instalar app).';
   } else if (!fails.length) {
     v.className = 'bad';
-    v.textContent = 'Arquivos todos OK. O Chrome ainda não liberou o convite — aguarde 1 minuto e recarregue esta página (ele valida o Service Worker em segundo plano).';
+    v.textContent = 'Arquivos e Service Worker OK. Aguarde 10 s e RECARREGUE esta página — na recarga o Chrome libera o convite de instalação.';
   } else {
     v.className = 'bad';
-    v.textContent = 'PROBLEMA: ' + fails.map(f => f.querySelector('b').textContent).join(' • ') + '. Corrija o(s) item(ns) com ✗ e reenvie ao repositório.';
+    v.textContent = 'PROBLEMA: ' + fails.map(f => f.querySelector('b').textContent).join(' • ') + '.';
   }
 }
 
 /* 1. HTTPS */
 row('cHttps', 'Conexão segura (HTTPS)');
-if (location.protocol === 'https:') set('cHttps', 'ok', 'HTTPS ativo — requisito atendido.');
-else set('cHttps', 'fail', 'Não está em HTTPS. Abra pelo endereço do GitHub Pages, não como arquivo local.');
+if (location.protocol === 'https:') set('cHttps', 'ok', 'HTTPS ativo.');
+else set('cHttps', 'fail', 'Não está em HTTPS. Abra pelo endereço do GitHub Pages.');
 
 /* 2. manifest */
 row('cMan', 'manifest.json');
 fetch(bust('manifest.json'), NOSTORE).then(r => {
-  if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — arquivo não existe no repositório' : ''));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }).then(m => {
   const problems = [];
@@ -87,20 +87,20 @@ fetch(bust('manifest.json'), NOSTORE).then(r => {
   const icons = m.icons || [];
   if (!icons.some(i => (i.sizes || '').includes('192'))) problems.push('falta ícone 192');
   if (!icons.some(i => (i.sizes || '').includes('512'))) problems.push('falta ícone 512');
-  if (problems.length) set('cMan', 'fail', 'Existe, mas com problemas: ' + problems.join('; '));
+  if (problems.length) set('cMan', 'fail', problems.join('; '));
   else set('cMan', 'ok', 'Válido — "' + (m.short_name || m.name) + '"');
 }).catch(e => set('cMan', 'fail', e.message));
 
-/* 3. ícones — baixa cada um de verdade */
+/* 3. ícones */
 [['icon-192.png','cI192','Ícone 192px'],
  ['icon-512.png','cI512','Ícone 512px'],
  ['icon-maskable-512.png','cIMask','Ícone maskable']].forEach(([file, id, title]) => {
   row(id, title + ' — ' + file);
   fetch(bust(file), NOSTORE).then(r => {
-    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — não existe no repo (você gerou e subiu os PNGs?)' : ''));
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — arquivo não existe (nome exato?)' : ''));
     return r.blob();
   }).then(b => {
-    if (b.type && !b.type.startsWith('image/')) throw new Error('Existe mas não é imagem (' + b.type + ') — confira o nome exato do arquivo');
+    if (b.type && !b.type.startsWith('image/')) throw new Error('Existe mas não é imagem (' + b.type + ')');
     set(id, 'ok', 'Encontrado (' + Math.round(b.size / 1024) + ' KB)');
   }).catch(e => set(id, 'fail', e.message));
 });
@@ -110,42 +110,46 @@ fetch(bust('manifest.json'), NOSTORE).then(r => {
  ['sw.js','cSw','sw.js (offline)']].forEach(([file, id, title]) => {
   row(id, title);
   fetch(bust(file), NOSTORE).then(r => {
-    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 404 ? ' — não encontrado no repo' : ''));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.text();
   }).then(t => {
-    if (/^\s*<(!DOCTYPE|html)/i.test(t)) throw new Error('Existe mas o conteúdo é HTML (página de erro) — nome/caminho errado');
+    if (/^\s*<(!DOCTYPE|html)/i.test(t)) throw new Error('Conteúdo é HTML (erro 404) — nome/caminho errado');
     set(id, 'ok', 'Encontrado (' + Math.round(t.length / 1024) + ' KB)');
   }).catch(e => set(id, 'fail', e.message));
 });
 
-/* 5. Service Worker */
-row('cSW', 'Service Worker registrado');
+/* 5. Service Worker — agora o diagnóstico REGISTRA ele mesmo, se necessário */
+row('cSW', 'Service Worker');
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistration().then(reg => {
-    if (!reg) set('cSW', 'fail', 'Nenhum SW registrado. Recarregue e aguarde 10 s. Se persistir, o sw.js está com erro.');
-    else {
-      const st = (reg.active && 'ativo') || (reg.installing && 'instalando') || (reg.waiting && 'aguardando') || '?';
-      set('cSW', 'ok', 'Registrado — estado: ' + st + (navigator.serviceWorker.controller ? ' • controlando a página' : ' • recarregue 1× para assumir o controle'));
+    if (reg && (reg.active || reg.installing || reg.waiting)) {
+      const st = (reg.active && 'ativo') || (reg.installing && 'instalando') || 'aguardando';
+      set('cSW', 'ok', 'Registrado — estado: ' + st + (navigator.serviceWorker.controller ? ' • controlando esta página' : ' • recarregue 1× para assumir'));
+    } else {
+      /* ninguém registrou ainda: o diagnóstico registra agora */
+      navigator.serviceWorker.register('./sw.js')
+        .then(r => set('cSW', 'ok', 'Registrado AGORA com sucesso! Aguarde 10 s e recarregue esta página.'))
+        .catch(err => set('cSW', 'fail', 'Falhou ao registrar: ' + (err && err.message ? err.message : err)));
     }
   }).catch(e => set('cSW', 'fail', e.message));
 } else set('cSW', 'fail', 'Navegador sem suporte a Service Worker.');
 
 /* 6. convite de instalação */
 row('cBip', 'Convite de instalação (beforeinstallprompt)');
-set('cBip', 'wait', 'Aguardando o Chrome decidir… (até 15 s)');
+set('cBip', 'wait', 'Aguardando o Chrome decidir…');
 
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   bip = e;
-  set('cBip', 'ok', 'O Chrome considera o app INSTALÁVEL! Toque no botão azul abaixo.');
+  set('cBip', 'ok', 'O Chrome considera o app INSTALÁVEL! Toque no botão azul.');
   document.getElementById('btnInstall').hidden = false;
 });
 setTimeout(() => {
   if (!bip) {
     const anyFail = document.querySelector('.row.fail');
     set('cBip', 'fail', anyFail
-      ? 'Não disparou porque há um ✗ acima. Corrija-o no repositório e recarregue esta página.'
-      : 'Não disparou apesar de tudo ✓. Aguarde 1 min e recarregue; o Chrome às vezes demora para validar.');
+      ? 'Não disparou porque há um ✗ acima. Corrija-o e recarregue.'
+      : 'Não disparou ainda. Aguarde 10 s e RECARREGUE a página — na recarga, com o SW ativo, ele dispara.');
   }
 }, 15000);
 
@@ -156,7 +160,7 @@ document.getElementById('btnInstall').addEventListener('click', async () => {
   if (choice && choice.outcome === 'accepted') {
     const v = document.getElementById('verdict');
     v.className = 'good';
-    v.textContent = 'Instalação aceita! Procure o ícone azul com ✓ na tela inicial do celular.';
+    v.textContent = 'Instalação aceita! Procure o ícone azul com ✓ na tela inicial.';
   }
   bip = null;
   document.getElementById('btnInstall').hidden = true;
