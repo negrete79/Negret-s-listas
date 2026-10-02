@@ -1,19 +1,36 @@
 'use strict';
 
 /* ================================================================
-   NEGRET'S list — comportamento do app (versão final)
+   NEGRET'S list — comportamento do app (versão completa)
    Lista offline (localStorage) + exportação PDF (jsPDF cacheado)
+   + Premium vendido via WhatsApp com código de ativação
    ================================================================ */
 
 const APP_VERSION = '1.8.13';
 const JSPDF_URL   = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-const KEYS        = { items: 'ench_v2', saved: 'ench_saved', cfg: 'ench_cfg' };
+const KEYS        = { items: 'ench_v2', saved: 'ench_saved', cfg: 'ench_cfg', prem: 'ench_prem' };
 const CFG_DEFAULT = { sort: 'added', strike: true, confirmDel: true, countChecked: false, budget: 0 };
+
+/* ============ Premium (venda via WhatsApp + código) ============ */
+const PREMIUM_WPP = '5531982517147'; /* 55 + DDD 31 + 982517147 */
+const WPP_MSG = "Olá! Quero assinar o NEGRET'Slist Premium (R$ 9,90/mês).\n\nMeu nome: ";
+const FREE_LIST_LIMIT = 3; /* listas salvas permitidas no plano gratuito */
+
+/* Códigos de ativação válidos. Vendeu uma assinatura? Adicione um código
+   novo aqui e envie ao cliente pelo WhatsApp. Remova para revogar. */
+const PREMIUM_CODES = [
+  'NGRT-TESTE',    /* código de teste — remova antes de divulgar */
+  'NGRT-7H2K9Q',
+  'NGRT-M4XP8T',
+  'NGRT-B6RJ3V',
+  'NGRT-K9WD5S'
+];
 
 /* ============ utilitários ============ */
 const $ = s => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const normCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const buzz = (ms = 8) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
 const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /* formato próprio para o PDF (evita espaços especiais do Intl dentro do jsPDF) */
@@ -67,12 +84,17 @@ if (!Array.isArray(saved)) saved = [];
 
 let cfg = Object.assign({}, CFG_DEFAULT, loadJSON(KEYS.cfg, {}));
 
+let premium = loadJSON(KEYS.prem, { active: false });
+if (!premium || typeof premium !== 'object') premium = { active: false };
+
 let query = '', editingId = null, itemQty = 1, lastToggled = null;
 let lastTotal = null, confirmOk = null, currentSheet = null, deferredPrompt = null;
 
 const saveItems = () => store(KEYS.items, items);
 const saveSaved = () => store(KEYS.saved, saved);
 const saveCfg   = () => store(KEYS.cfg, cfg);
+const savePrem  = () => store(KEYS.prem, premium);
+const isPremium = () => !!(premium && premium.active);
 const sumTotal  = (list, onlyChecked) =>
   list.reduce((s, i) => (onlyChecked && !i.c) ? s : s + i.p * i.q, 0);
 
@@ -362,7 +384,7 @@ drawer.addEventListener('click', e => {
     case 'lists':    buildListsSheet(); openSheet('sheetLists'); break;
     case 'budget':   openBudgetSheet(); break;
     case 'expenses': buildExpenses(); openSheet('sheetExpenses'); break;
-    case 'premium':  openSheet('sheetPremium'); break;
+    case 'premium':  renderPremium(); openSheet('sheetPremium'); break;
     case 'settings': syncSettings(); openSheet('sheetSettings'); break;
   }
 });
@@ -385,15 +407,30 @@ function snapshotCurrent(name) {
   saveSaved();
 }
 
+/* limite do plano gratuito: 3 listas salvas (Premium libera ilimitadas) */
+function checkListQuota() {
+  if (isPremium() || saved.length < FREE_LIST_LIMIT) return true;
+  openConfirm({
+    title: 'Limite do plano gratuito',
+    msg: 'No plano gratuito você pode manter até ' + FREE_LIST_LIMIT +
+         ' listas salvas. O Premium libera listas ilimitadas.',
+    ok: 'Ver Premium',
+    onOk() { renderPremium(); openSheet('sheetPremium'); }
+  });
+  return false;
+}
+
  $('#btnNewSkip').addEventListener('click', () => {
   items = []; saveItems(); render(); closeAll(); toast('Nova lista criada');
 });
  $('#btnNewSave').addEventListener('click', () => {
+  if (!checkListQuota()) return;
   snapshotCurrent($('#newListName').value.trim() || null);
   items = []; saveItems(); render(); closeAll(); toast('Lista salva e nova lista criada');
 });
  $('#btnSaveCurrent').addEventListener('click', () => {
   if (!items.length) { toast('A lista atual está vazia'); return; }
+  if (!checkListQuota()) return;
   snapshotCurrent($('#saveName').value.trim() || null);
   $('#saveName').value = '';
   buildListsSheet(); toast('Lista salva com sucesso'); buzz(10);
@@ -539,11 +576,70 @@ function buildExpenses() {
   }
 }
 
-/* ============ premium / configurações ============ */
- $('#btnSubscribe').addEventListener('click', () =>
-  toast('Loja de pagamentos indisponível nesta versão de demonstração')
-);
+/* ============ premium: WhatsApp + painel de ativação ============ */
+function openWhatsApp() {
+  const url = 'https://wa.me/' + PREMIUM_WPP + '?text=' + encodeURIComponent(WPP_MSG);
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+ $('#btnWpp').addEventListener('click', openWhatsApp);
 
+function renderPremium() {
+  const on = isPremium();
+  $('#premFree').hidden = on;
+  $('#premActive').hidden = !on;
+  const chip = $('#premChip');
+  chip.textContent = on ? 'ATIVO' : 'PRO';
+  chip.classList.toggle('gold', on);
+  if (on) {
+    const d = premium.since ? new Date(premium.since) : null;
+    $('#premMeta').textContent =
+      'Ativado em ' + (d ? dateParts(d).br : '—') +
+      ' • código ' + (premium.code || '—');
+  }
+}
+
+function tryActivate() {
+  const el = $('#codeInput'), msg = $('#actMsg');
+  const raw = (el.value || '').trim();
+  if (!raw) {
+    msg.textContent = 'Digite o código que você recebeu no WhatsApp.';
+    msg.className = 'act-msg err';
+    el.focus(); buzz(30);
+    return;
+  }
+  const key = normCode(raw);
+  const valid = PREMIUM_CODES.some(c => normCode(c) === key);
+  if (!valid) {
+    msg.textContent = 'Código inválido. Confira a mensagem que enviamos no WhatsApp.';
+    msg.className = 'act-msg err';
+    buzz(30);
+    return;
+  }
+  premium = { active: true, code: raw.toUpperCase(), since: new Date().toISOString() };
+  savePrem();
+  el.value = ''; msg.textContent = ''; msg.className = 'act-msg';
+  renderPremium(); buzz(12);
+  toast('Premium ativado neste aparelho');
+}
+ $('#btnActivate').addEventListener('click', tryActivate);
+ $('#codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryActivate(); });
+
+ $('#btnDeactivate').addEventListener('click', () => {
+  openConfirm({
+    title: 'Desativar Premium',
+    msg: 'O Premium será desativado neste aparelho. Seu código continua válido — dá para ativar de novo quando quiser.',
+    ok: 'Desativar', danger: true,
+    onOk() {
+      premium = { active: false };
+      savePrem(); renderPremium();
+      toast('Premium desativado');
+    }
+  });
+});
+
+/* ============ configurações ============ */
 function syncSettings() {
   $('#swStrike').checked = cfg.strike;
   $('#swConfirm').checked = cfg.confirmDel;
@@ -565,12 +661,13 @@ function syncSettings() {
  $('#btnWipe').addEventListener('click', () => {
   openConfirm({
     title: 'Apagar todos os dados',
-    msg: 'Lista atual, listas salvas, orçamento e configurações serão removidos. Não dá para desfazer.',
+    msg: 'Lista atual, listas salvas, orçamento, Premium e configurações serão removidos. Não dá para desfazer.',
     ok: 'Apagar tudo', danger: true,
     onOk() {
       Object.values(KEYS).forEach(k => localStorage.removeItem(k));
-      items = []; saved = []; cfg = { ...CFG_DEFAULT };
-      render(); toast('Todos os dados foram apagados');
+      items = []; saved = []; cfg = { ...CFG_DEFAULT }; premium = { active: false };
+      render(); renderPremium();
+      toast('Todos os dados foram apagados');
     }
   });
 });
@@ -728,3 +825,4 @@ if ('serviceWorker' in navigator &&
 /* ============ boot ============ */
  $('#verLabel').textContent = 'Versão ' + APP_VERSION;
 render();
+renderPremium();
